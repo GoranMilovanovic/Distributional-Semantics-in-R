@@ -1,0 +1,561 @@
+# Methods of Distributional Semantics in R
+## Case Study: The Distributional Semantics of Shakespeare's Plays
+## Part 1. The {tm} structures for text-mining in R
+### BelgradeR Meetup :: Data Science Serbia, Startit Center
+
+11/30/2016, Belgrade, Serbia, Startit Center, Savska 5
+
+Organized by: [Data Science Serbia](http//:www.datascience.rs) and [Startit](http://en.startit.rs)
+
+***
+
+![](img/GoranSMilovanovic.jpg)
+
+#### [Goran S. Milovanović](http://www.exactness.net), PhD
+#### Data Science Mentor at [Springboard](https://www.springboard.com/workshops/data-science), [Data Science Serbia](http://www.datascience.rs) 
+
+***
+
+Following my *Methods of Distributional Semantics in* BelgradeR Meetup with [Data Science Serbia](http//:www.datascience.rs), organized in [Startit Center](http://en.startit.rs), Belgrade, 11/30/2016, several people asked me for the R code used for the analysis of William Shakespeare's plays that was presented. I have decided to continue the development of that code in order to advance the examples that I have shown then into a more or less complete and comprehensible text-mining tutorial with {tm}, {openNLP}, and {topicmodels} in R. All files in this GitHub repository are a product of that work.
+
+***
+
+### The Idea
+
+The idea here is to provide an overview of selected R packages and functions for text-mining and modeling in [distributional semantics](https://en.wikipedia.org/wiki/Distributional_semantics). Instead of presenting functions and packages in a piece-wise fashion, I have decided to develop a full text-mining pipeline by combining the essential steps orderly and exactly as one would need to follow them to arrive at some useful Data Science production following data wrangling, checking for integrity, text pre-processing, and modeling.
+
+There are many approaches that one can take in text-mining to produce relevant results; the approach presented here is didactical in its nature and certainly not the only one correct. However, there's a plenty to learn about [{tm}](https://cran.r-project.org/web/packages/tm/index.html), [{topicmodels}](https://cran.r-project.org/web/packages/topicmodels/index.html), [{openNLP}](https://cran.r-project.org/web/packages/openNLP/index.html) and other interesting things that one can utilize to do text-mining in R from here. Another thing: I wanted to make sure to face you with real-life problems in text-mining in R with {tm}. That means: simply calling one by one `content_transformer` from {tm} won't do - in spite of the prevailing belief formed from too many online tutorials on text-mining with {tm} that explain how to get from reading in corpora to wordclouds in four or five `tm_map()` calls.
+
+***
+
+### Source Material: Shakespeare's plays
+
+![](img/Title_page_William_Shakespeare's_First_Folio_1623.jpg)
+
+<br>
+<p style="font-size:75%;">Title page of the <b>First Folio, 1623.</b> Copper engraving of Shakespeare by Martin Droeshout. Source: <a href = "https://en.wikipedia.org/wiki/William_Shakespeare" target="_blank"><i>Wikipedia</i></a></p>
+
+
+Well of course it's Shakespeare. You are not really initiated in text-mining and distributional semantics if you don't tear apart Shakespeare's collected plays at least once in your lifetime! The exercise uses the complete plays of [William Shakespeare](https://en.wikipedia.org/wiki/William_Shakespeare), of which full texts are kindly provided by the [Massachusetts Institute of Technology](http://web.mit.edu/) at their [The Complete Works of William Shakespeare](http://shakespeare.mit.edu/) pages.
+
+### Additional Data Sets
+
+I will be using two additional data sets besides the text corpus of Shakespeare's plays provided by the [The Complete Works of William Shakespeare](http://shakespeare.mit.edu/) website.
+
++ The `playList.csv` file (found in this GitHub repository), in which the `Written` column originates from the following web-page: [Shakespeare's Works: A Timeline](http://www.bardweb.net/plays/timeline.html). The 'Written' columns refers to the year when Shakespeare has *completed* the writing of the respective play - or at least the year when the historians believe he did so. The role of other columns in `playList.csv` will be explained along the way.
+
++ The `DramatisPersonae.csv` file: column `Speeches` presents the count of the respective's character speeches; column `Character` lists the characters' names; finally, column `Play` gives a comma separated string encompassing all of the plays in which the respective character appears. The table is obtained from the [OpenSourceShakespeare](http://www.opensourceshakespeare.org/views/plays/characters/chardisplay.php?sortby=lines&searchterm) website.
+
+***
+
+### Structure
+
+The first notebook - **Part 1: The {tm} structures for text-mining in R** - introduces the classes provided by the {tm} package, and show you how to index a text corpus with metadata prior to modeling and analytics. You will not err much by saying that most of what is front of us in this notebook is really about data *wrangling* for text-mining applications. I will be also presenting the essential read and write operations from {tm}.
+
+***
+
+### Part 1: The {tm} structures for text-mining in R
+
+**1.1 Clear all**
+
+``` {r echo = T}
+### --- clear all
+rm(list=ls())
+```
+
+**1.2 Load packages**
+
+``` {r echo = T, message = F}
+### ----------------------------------------------------------------------
+### --- libraries
+
+# - helpers
+library(dplyr)
+library(tidyr)
+
+# - text-mining: pre-processing + stemmer, tokenizer, sentiment
+library(tm)
+library(tm.plugin.sentiment)
+library(XML)
+library(tau)
+library(stringr)
+
+# - SnowballC for Porter's stemmer
+library(SnowballC)
+
+# - Support + JVM Options
+library(rJava)
+numCores <- 2; # for multicore platforms
+options(mc.cores=numCores)
+.jinit(classpath="myClasses.jar", parameters="-Xmx512m")
+library(RWeka) # load RWeka for tokenizers only after setting Options
+
+# - topic models via Latent Dirichlet Allocation
+library(topicmodels)
+
+# - entitity recognition via Apache OpenNLP
+library(openNLP)
+
+# - graphics
+library(ggplot2)
+library(ggrepel)
+library(igraph)
+library(wordcloud)
+
+# - analytics
+library(Hmisc)
+library(smacof)
+library(ape)
+
+# - parallelism
+library(snowfall)
+```
+
+**1.3 Load Shakespear's Plays: learn about {tm} sources, readers, and corpora**
+
+First we take a look at the source directory: there are 37 Shakespeare's plays there, all in raw .txt format.
+
+``` {r echo = T}
+### ----------------------------------------------------------------------
+### --- Load Shakespear's Plays
+
+### --- working directory
+wDir <- 
+  paste0(getwd(),'/FullCorpus/Shakespeare')
+setwd(wDir)
+list.files(wDir)
+```
+
+**1.3.1 Load Shakespeare's Plays in a {tm}** `Corpus`
+
+In order to develop a text corpus in {tm}, we need two things. First, we need a definition of a `source`. All available sources can be listed by calling the {tm} `getSources()` function:
+
+``` {r echo = T}
+### --- read Shakespeare w. {tm}
+
+# - {tm} data structures
+getSources()
+```
+
+The **Data Import** section of the [{tm} vignette](ftp://cran.r-project.org/pub/R/web/packages/tm/vignettes/tm.pdf) explains nicely how to use these. A `Source` object in {tm} essentially describes the format of the input data. Given that our plays are provided as raw text files in a directory, we need to use the `DirSource` definition. We want to construct a `VCorpus` (or simply `Corpus`) {tm} object from 38 text files. In order to do so, we need to call a function `VCorpus` and pass two arguments to it: a `source`, and a named list `readerControl` that will deal with the elements from which the corpus is being constructed (in our case, raw text files). The `readerControl` list has two components: `reader` and `language`; while the former constructs a text document from the source elements (again, .txt files in this example), the later selects the appropriate language (the package vignette suggests to use ISO 639-2 codes; however, the package CRAN documentation suggests using IETF language tags). A list of all avaialable readers is obtained by a `getReaders()` call:
+
+``` {r echo = T}
+getReaders()
+```
+
+To construct a {tm} `VCorpus` from the 37 .txt files found in `/FullCorpus/Shakespeare`, here is what we do (don't worry, a step by step explanation is on its way):
+
+``` {r echo = T}
+# - construct readerControl for Shakespeare:
+corpus <- VCorpus(
+  DirSource(wDir, 
+            encoding = "UTF-8",
+            mode = "text"), # uses {base} readLines()
+  readerControl = list(reader = readPlain,
+                       language = "en")
+  )
+
+# - how many documents there are?
+length(corpus)
+```
+``` {r echo = T}
+class(corpus)
+```
+
+The first argument to `VCorpus` is the definition of the source: we have asked for a `DirSource` by calling `DirSource()` and passing (1) the path towards the directory (`wDir`, previously defined), (2) the encoding (`UTF-8`, of course), and (3) the `mode`, which in this case takes the value of `"text"`, meaning that we are instructing R to use its {base} function `readLines()` in order to load one by one all .txt files found in `wDir` (for the usage of `mode`, c.f. [{tm} CRAN documentation](https://cran.r-project.org/web/packages/tm/tm.pdf)). The second argument to `VCorpus` was `readerControl`, as explained, where the selected `reader` is `readPlain`, and the language - English (in fact provided by an IETF language tag here: `en`). Result: we have loaded 37 documents and formed a `VCorpus` object from them. For the difference between volatile and permanent (`PCorpus`) corpora objects in {tm}, please refer to the [{tm} CRAN documentation](https://cran.r-project.org/web/packages/tm/tm.pdf). We will use only {tm} volatile corpora here.
+
+Another useful example: a {tm} `VCorpus` from a set of XML documents. Do you know how to use `XPath` to navigate through XML files? Hmm... no? It is extremely simple: take a look at this [W3C XPath Tutorial](http://www.w3schools.com/xml/xpath_intro.asp).
+
+**1.3.2 Macbeth as a an XML sourced {tm}** `corpus`
+
+**N.B.** Before you attempt to do this, it is advised to open any of the XML files from `/FullCorpus/XMLExample` and inspect its structure.
+
+From what we have learned thus far, we know that we need to define (1) a `Source` to read the XML files from, and (2) an appropriate `reader`. In `/FullCorpus/XMLExample` you will find five XML files. Each of the files contains a separate act from *Macbeth*. In the following exercise, we load these five XMLs to produce a mini-corpus with {tm}.
+
+``` {r echo = T}
+### --- different readers, e.g. XML:
+# XML reader for Macbeth :: five XML files, each Act = one XML file
+
+# - xmlDir
+xmlDir <- paste0(getwd(),'/FullCorpus/XMLExample')
+setwd(xmlDir)
+list.files(xmlDir)
+
+# reader function:
+myXMLReader <- readXML(spec = list(Title = list("node", "/Document/Title"),
+                                   Year = list("node", "/Document/Year"),
+                                   Language = list("node", "/Document/Language"),
+                                   Description = list("node", "/Document/Description"),
+                                   content = list("node", "/Document/Content")),
+                       doc = PlainTextDocument())
+```
+
+The `spec` argument here helps define the essential characteristics of the XML structure that we are about to read. It provides the `readXML()` function with a named list where each component navigates towards a specific XML element defined by the respective `XPath` syntax. The names of the `spec` list components will translate into `VCorpus` document-level meta information, as we will see. **N.B.** One component of `spec` *must* be named `content`, and that component must encompass the `XPath` expression referring to the XML tag that collects the *content* of the document. To give a glimpse: we are really reading in an annotated corpus here; each of its tags are stored in some specific XML tags that we already know about, so that, for example, the `/Document/Title` path maps the value of the `Title` tag, the `/Document/Year` path maps the value of the `Year` tag, etc; one of these paths - in our case: `/Document/Content` maps the value of the content of the document itself.
+
+``` {r echo = T}
+# define source
+myXMLSource <- DirSource(directory = xmlDir,
+                     encoding = "UTF-8",
+                     recursive = FALSE,
+                     mode = "text")
+```
+
+And now we have a `Source` defined too. The `recursive = FALSE` expression instructs R not to look for files in any of the directories under `xmlDir` (if there are any at all). Let's see now:
+
+``` {r echo = T}
+# load Example Corpus
+xmlCorpus <- VCorpus(myXMLSource, 
+                    readerControl = list(reader = myXMLReader))
+```
+
+``` {r echo = T}
+# - inspect xmlCorpus
+xmlCorpus[[1]]$meta
+```
+
+The tags `Title`, `Year`, `Language`, and `Description` are obtained from the respective `XPath` expression as defined in `myXMLReader` above; all other tags were automatically generated by {tm}. Let's explain the `xmlCorpus[[1]]$meta` line now: first of all, `VCorpus` is essentially a list (an S3 object, Ok), so `xmlCorpus[[1]]` refers to its first component. Two fields are found there: `$content`, and `$meta` - the one that we've asked about. Now, it should be clear where the `content = list("node", "/Document/Content")` expression from `spec` in `myXMLReader` has finished:
+
+``` {r echo = T}
+str_sub(xmlCorpus[[1]]$content,1,1000)
+```
+
+So: `$meta` to access the document-level meta information, `$content` to access the document content. As simple as that, but we will be elaborating on these two soon.
+
+
+**1.3.3 Accessing document metadata and content**
+
+We have previously loaded all 37 of Shakespeare's plays to `corpus`.
+
+``` {r echo = T}
+### ----------------------------------------------------------------------
+### --- Accessing documents and metadata
+
+# - accessing documents: content and metadata
+corpus[[1]]$meta
+```
+
+``` {r echo = T}
+class(corpus[[1]]$content)
+```
+
+``` {r echo = T}
+length(corpus[[1]]$content)
+```
+
+``` {r echo = T}
+corpus[[1]]$content[1:20] # we need to fix this, right
+```
+
+``` {r echo = T}
+# - PlainTextDocument
+class(corpus[[1]])
+```
+
+``` {r echo = T}
+# - content is character()
+class(corpus[[1]]$content)
+```
+
+``` {r echo = T}
+# - even document-level meta-data has a class of their own:
+class(corpus[[1]]$meta)
+```
+
+**1.3.3 Introduction to Content Transformations in {tm}**
+
+As already explained, a `VCorpus` is essentially a list. Since we have used R {base} `readLines()` in our `VCorpus()` call to create our `corpus`, we have ended up with the document content spread across multiple lines:
+
+``` {r echo = T}
+head(corpus[[1]]$content,10)
+```
+
+However, **do not** attempt to do something like this with an object of the `VCorpus` class:
+
+``` {r echo = T}
+### ----------------------------------------------------------------------
+### --- Content transformations
+
+# - VCorpus is a list, right? Yes, but...
+# - N.B. Do not do this:
+# - fix content as obtained from readLines():
+# corpus <- lapply(corpus, function(x) {
+#   x$content <- paste(x$content, collapse = " ")
+# })
+```
+
+When applying any content transformation in {tm}, we use its `content_transformer()` function. This function can pass any arbitrary R function that transforms the content of the document via a `tm_map()` call:
+
+``` {r echo = T}
+# In {tm}, one needs to use a content transformer function
+# First, define the function that you want to apply over the document content
+contentCollapse <- function(content) {
+  content <- paste(content, collapse = " ")
+  return(content)
+}
+```
+
+We have now defined a new function: `contentCollapse()`. This is how we send it over the `corpus` by `tm_map()` and `content_transformer()`:
+
+``` {r echo = T}
+# then call tm_map():
+corpus <- tm_map(corpus, 
+                 content_transformer(contentCollapse),
+                 lazy=TRUE)
+# test
+str_sub(corpus[[1]]$content,1,1000)
+```
+
+Now that looks much better. We have now learned how a `tm_map()` call distributes the `content_transformer()` call (with any arbitrary R function that transforms the contents of the documents) across the corpus. `tm_map()` is a powerful {tm} function indeed; it will even automatically balance its execution across several workers in your system if you let it, and it is highly suggested to learn more about it from the {tm} package official documentation.
+
+``` {r echo = T}
+### --- Read more on tm_map from {tm} Documentation
+# - URL: https://cran.r-project.org/web/packages/tm/tm.pdf
+# parameter lazy:
+# a logical. Lazy mappings are mappings which are delayed until the content is 
+# accessed. It is useful for large corpora if only few documents will be
+# accessed. In such a case it avoids the computationally expensive application
+# of the mapping to all elements in the corpus.
+
+# - tm_map() call from {tm} on multicore platforms:
+# then call tm_map():
+# corpus <- tm_map(corpus, 
+#                  content_transformer(contentCollapse),
+#                  mc.cores = 2)
+```
+
+Many more details on Content Transformations with {tm} will be provided in Part 2. on text pre-processing.
+
+**1.2.5 Metadata access and editing**
+
+Again, to access a specific meta-datum from a `corpus`, use `meta()`:
+
+``` {r echo = T}
+### ----------------------------------------------------------------------
+### --- Metadata access and editing
+
+# - access metadata
+head(meta(corpus, tag="id")) # {tm} meta() to access document-level metadata
+```
+
+``` {r echo = T}
+class(meta(corpus, tag="id"))
+```
+
+A call to `meta()` returns a list; so don't forget to `unlist()` if you need to use any of the meta information in a vector. The `id` tag was generated in {tm} automatically from the respective file names. To obtain the real names of the plays:
+
+``` {r echo = T}
+playTitle <- unname(sapply(as.character(meta(corpus, tag="id")),
+                           function(x) {
+                             strsplit(x, split = ".", fixed = T)[[1]][1]
+                             }))
+playTitle
+```
+
+A call to `sapply()` implies that we need not use `unlist()` to pick-up the result as a vector here. Let's fix the `id` tags from the `playTitle` vector now:
+
+``` {r echo = T}
+# - enter new metadata: id
+meta(corpus, tag="id", type="local") <- playTitle
+head(meta(corpus, tag="id"))
+```
+
+That's better. Who is the author of the plays, however?
+
+``` {r echo = T}
+# - enter new metadata: author
+head(meta(corpus, tag="author"))
+```
+
+Oh no, no, no, can't be:
+
+``` {r echo = T}
+meta(corpus, tag="author", type="local") <- 
+  rep("William Shakespeare",length(corpus))
+head(meta(corpus, tag="author"))
+```
+
+Our meta information on Shakespeare's plays is quite basic at the moment. Let's load more metadata from `playList.csv` (found in the `/FullCorpus` directory).
+
+``` {r echo = T}
+# - load more metadata
+wDir <- paste0(getwd(),'/FullCorpus')
+setwd(wDir)
+playList <- read.csv('playList.csv',
+                     header = T,
+                     check.names = F,
+                     row.names = 1,
+                     stringsAsFactors = F)
+str(playList)
+```
+
+Let's see: there's the full title of the play under `$Play`, and the year in which Shakespeare completed its writing is found in `$Written`; `$Type` should be telling enough in itself, while `$Code` is an abbreviation of the play's title that will be used to match these metadata with an additional set of metadata that we will introduce later.
+
+Do we have all of the plays in our `playList`:
+
+``` {r echo = T}
+# - have we collected all plays?
+wMissing <- which(!(playList$Play %in% as.character(meta(corpus,tag="id"))))
+# - check
+playList$Play[wMissing]
+```
+
+Are they given in the same order in `playList` as they are in `corpus`:
+
+``` {r echo = T}
+# - is the order of plays correct? - No, but who cares
+as.character(meta(corpus, tag="id")) == playList$Play
+```
+
+They are not, but that's so unimportant. Let's start adding new metadata to the `corpus`: we will compare the `id` tag value of each play in `corpus` with the `playList$Play` column in an `sapply()` call and figure out what stands were and add the respective values to the `Year` tags in the `corpus`:
+
+``` {r echo = T}
+# - new metadata
+meta(corpus, tag = "yearWritten", type = "local") <- 
+  unname(sapply(meta(corpus, tag = "id"),
+         function(x) {
+           wPlay <- which(playList$Play == as.character(x))
+           playList$Written[wPlay]
+         }))
+# - check
+head(meta(corpus, tag = "yearWritten"))
+```
+
+Let's check-this out:
+
+``` {r echo = T}
+# - check yearWritten tag
+corpus[[1]]$meta$id
+```
+
+``` {r echo = T}
+corpus[[1]]$meta$yearWritten
+```
+
+``` {r echo = T}
+corpus[[19]]$meta$id
+```
+
+``` {r echo = T}
+corpus[[19]]$meta$yearWritten
+```
+
+Don't forget to credit your sources:
+
+``` {r echo = T}
+# - origin tag: http://shakespeare.mit.edu/
+meta(corpus, tag = "origin", type = "local") <- 
+  rep("http://shakespeare.mit.edu/", length(corpus))
+# - check
+head(meta(corpus, tag = "origin"))
+```
+
+Now we assign the `playList$Type` values to the `description` tags in `corpus`:
+
+``` {r echo = T}
+# - description tag: I will use this one for play type:
+meta(corpus, tag = "description", type = "local") <- 
+  unname(sapply(meta(corpus, tag = "id"),
+                       function(x) {
+                         wPlay <- which(playList$Play == as.character(x))
+                         playList$Type[wPlay]
+                       }))
+# - check
+head(meta(corpus, tag = "description"))
+```
+
+Finally, we add a `code` document-level tag to `corpus` in order to store the play title abbreviations that will be used to match the `corpus` to another set of metadata:
+
+``` {r echo = T}
+# - code tag: a key from playList that matches 'DramatisPersonae.csv'
+meta(corpus, tag = "code", type = "local") <- 
+  unname(sapply(meta(corpus, tag = "id"),
+                       function(x) {
+                         wPlay <- which(playList$Play == as.character(x))
+                         playList$Code[wPlay]
+                       }))
+# - check
+head(meta(corpus, tag = "code"))
+```
+
+The `DramatisPersonae.csv` file was already described; let's introduce the information on Shakespeare's characters that's found there:
+
+``` {r echo = T}
+# - load more metadata
+wDir <- 
+  paste0(getwd(),'/FullCorpus')
+setwd(wDir)
+dramatisPersonae <- read.csv('DramatisPersonae.csv',
+                             check.names = F,
+                             header = T,
+                             stringsAsFactors = F)
+head(dramatisPersonae)
+```
+
+We first want to enter the *dramatis personae* to a new, designated column in `playList`:
+
+``` {r echo = T}
+# - produce dramatis personae tags for corpus
+dPersonae <- character(length(corpus))
+dPersonae <- sapply(playList$Code, function(x) {
+  wPlay <- which(grepl(x ,dramatisPersonae$Play, fixed=T))
+  paste(dramatisPersonae$Character[wPlay], collapse=", ")
+})
+# enter dramatis personae to playList
+playList$Characters <- dPersonae
+head(playList$Characters)
+```
+
+Let's check this out from Machbet
+``` {r echo = T}
+wMacbeth <- which(grepl('Macbeth',playList$Play,fixed=T))
+playList$Characters[wMacbeth]
+```
+
+Right. Now, to migrate this meta information to `corpus`:
+
+``` {r echo = T}
+# - enter dramatis personae metadata to corpus
+meta(corpus, tag = "characters", type = "local") <- 
+  unname(sapply(meta(corpus, tag = "id"),
+                       function(x) {
+                         wPlay <- which(playList$Play == as.character(x))
+                         playList$Characters[wPlay]
+                       }))
+# - check
+wPlay <- which(meta(corpus, tag="id") %in% "The Tempest")
+corpus[[wPlay]]$meta$characters
+```
+
+And another check to make sure that we're progressing fine here:
+
+``` {r echo = T}
+wPlay <- which(meta(corpus, tag="id") %in% "Romeo and Juliet")
+corpus[[wPlay]]$meta$characters
+```
+
+Ok. Now all the necessary metadata are in place. We will first store our `corpus` as an native R `Rds` file:
+
+``` {r echo = T}
+### --- writeCorpus()
+saveRDS(corpus, file = "ShakespeareAnnotated.Rds")
+```
+
+If anyone needs the content of the documents saved as .txt files after any processing in {tm}, a call to `writeCorpus()` would do:
+
+``` {r echo = T}
+### --- writeCorpus()
+outDir <- paste0(getwd(),"/FullCorpus/outCorpus")
+setwd(outDir)
+writeCorpus(corpus)
+```
+
+However, this will not save any metadata. 
+
+*** 
+
+The forthcoming Part 2. of this tutorial will cover **Entitity Recognition with {OpenNLP}**. We will check how well can machine learning tell what characters appear in which Shakespeare's play. In Part 3. we will deal with text pre-processing with {tm}, while Part 4. introduces topic modeling with Latent Dirichlet Allocation. Part 5, finally, will present an analytical exploration of the topic model. Stay tuned for more text-mining in R.
+
+***
+
+Visit my blog :: [The Exactness of Mind](http://www.exactness.net), 12/24/2016.  
+
