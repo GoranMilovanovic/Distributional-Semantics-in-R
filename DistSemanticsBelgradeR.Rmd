@@ -553,7 +553,7 @@ However, this will not save any metadata.
 
 *** 
 
-The forthcoming Part 2. of this tutorial will cover **Entitity Recognition with {OpenNLP}**. We will check how well can machine learning tell what characters appear in which Shakespeare's play. In Part 3. we will deal with text pre-processing with {tm}, while Part 4. introduces topic modeling with Latent Dirichlet Allocation. Part 5, finally, will present an analytical exploration of the topic model. Stay tuned for more text-mining in R.
+The forthcoming **Part 2.** of this tutorial will cover **Entitity Recognition with {OpenNLP}**. We will check how well can machine learning tell what characters appear in which Shakespeare's play. In **Part 3.** we will deal with text pre-processing with {tm}, while **Part 4.** introduces topic modeling with Latent Dirichlet Allocation. **Part 5**, finally, will present an analytical exploration of the topic model. Stay tuned for more text-mining in R.
 
 ***
 
