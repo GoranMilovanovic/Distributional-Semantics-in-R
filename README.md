@@ -1,4 +1,4 @@
-Distributional Semantics in R
+# Distributional Semantics in R
 
 Following my Methods of Distributional Semantics in BelgradeR Meetup with Data Science Serbia, organized in Startit Center, Belgrade, 11/30/2016, several people asked me for the R code used for the analysis of William Shakespeare's plays that was presented. I have decided to continue the development of that code in order to advance the examples that I have shown then into a more or less complete and comprehensible text-mining tutorial with {tm}, {openNLP}, and {topicmodels} in R. All files in this GitHub repository are a product of that work.
 
