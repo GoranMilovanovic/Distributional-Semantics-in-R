@@ -4,5 +4,6 @@ Following my Methods of Distributional Semantics in BelgradeR Meetup with Data S
 
 The idea here is to provide an overview of selected R packages and functions for text-mining and modeling in distributional semantics. Instead of presenting functions and packages in a piece-wise fashion, I have decided to develop a full text-mining pipeline by combining the essential steps orderly and exactly as one would need to follow them to arrive at some useful Data Science production following data wrangling, checking for integrity, text pre-processing, and modeling.
 
-![The Chandos portrait, artist and authenticity unconfirmed. Courtesy of the National Portrait Gallery, London.](img/Shakespeare.jpg)
-Image Source: ![William Shakespeare, Wikipedia Article](https://en.wikipedia.org/wiki/William_Shakespeare)
+![](img/Shakespeare.jpg)
+
+<p style="font-size:75%;">Source: <a href = "https://en.wikipedia.org/wiki/William_Shakespeare" target="_blank"><i>William Shakespeare, Wikipedia Article.</i></a></p>
