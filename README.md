@@ -6,4 +6,4 @@ The idea here is to provide an overview of selected R packages and functions for
 
 ![](img/Shakespeare.jpg)
 
-<p style="font-size:75%;">Source: <a href = "https://en.wikipedia.org/wiki/William_Shakespeare" target="_blank"><i>William Shakespeare, Wikipedia Article.</i></a></p>
+<p style="font-size:55%;">Image source: <a href = "https://en.wikipedia.org/wiki/William_Shakespeare" target="_blank"><i>William Shakespeare, Wikipedia Article.</i></a></p>
