@@ -6,6 +6,7 @@ The idea here is to provide an overview of selected R packages and functions for
 
 ![](img/Shakespeare.jpg)
 
-The Chandos portrait, artist and authenticity unconfirmed. Courtesy of the National Portrait Gallery, London.
-
+```html
+<p style="font-size:55%;">The Chandos portrait, artist and authenticity unconfirmed. Courtesy of the National Portrait Gallery, London.</p>
 <p style="font-size:55%;">Image source: <a href = "https://en.wikipedia.org/wiki/William_Shakespeare" target="_blank"><i>William Shakespeare, Wikipedia Article.</i></a></p>
+```
