@@ -1,0 +1,790 @@
+# Methods of Distributional Semantics in R
+## Case Study: The Distributional Semantics of Shakespeare's Plays
+## Part 2: Entity Recognition with {openNLP}
+### BelgradeR Meetup :: Data Science Serbia, Startit Center
+
+11/30/2016, Belgrade, Serbia, Startit Center, Savska 5
+
+Organized by: [Data Science Serbia](http//:www.datascience.rs) and [Startit](http://en.startit.rs)
+
+Notebook: 01/01/2017
+
+***
+
+![](img/GoranSMilovanovic.jpg)
+
+#### [Goran S. Milovanović](http://www.exactness.net), PhD
+#### Data Science Mentor at [Springboard](https://www.springboard.com/workshops/data-science), [Data Science Serbia](http://www.datascience.rs) 
+
+***
+
+Following my *Methods of Distributional Semantics in* BelgradeR Meetup with [Data Science Serbia](http//:www.datascience.rs), organized in [Startit Center](http://en.startit.rs), Belgrade, 11/30/2016, several people asked me for the R code used for the analysis of William Shakespeare's plays that was presented. I have decided to continue the development of that code in order to advance the examples that I have shown then into a more or less complete and comprehensible text-mining tutorial with {tm}, {openNLP}, and {topicmodels} in R. All files in this GitHub repository are a product of that work.
+
+***
+
+The second notebook in this series - **Part 2: Entity Recognition with {openNLP}** - introduces the classes provided by the {NLP} package and functions provided by {openNLP}. The {NLP} package provides a basic working infrastructure for Natural Language Processing in R; {openNLP}, on the other hand, provides an access to a set of pre-trained ML algorithms (*MaxEnt* classifiers, namely) for tasks such as tokenization, sentence segmentation, POS tagging, entity extraction, and similar. {openNLP} is really an interface to the Apache OpenNLP tools (version 1.5.3) which is written in Java.
+
+In this notebook we will focus on entity recognition from {openNLP} by trying to extract the names of Shakespeare's characters from its plays. In order to be able to run the entity recognition procedures from {openNLP}, we will first have to learn about *sentence segmentation* and *word tokenization*. In order to run the whole exercise that we present here, you will need to install the language specific openNLP *models*. I am providing instructions on these installations along the way.
+
+***
+
+### Part 1: The {tm} structures for text-mining in R
+
+The fact is, you don't really need to load all these packages in order to work with the notebook. I'm simply copying the whole *Load packages* code chunk from one notebook to another in this repository; it comprises all the packages used in the text-mining of Shakespeare's plays. For this Part (2) of the exercise, you need to load `tm`, `dplyr`, `ggplot2`, `stringr`, `NLP`, and `openNLP` only; a call to `library(openNLP)` will automatically import `NLP` as a dependency.
+
+**1.1 Clear all + Load packages**
+
+``` {r echo = T, message = F}
+### --- clear all
+rm(list=ls())
+
+### ----------------------------------------------------------------------
+### --- libraries
+
+# - helpers
+library(dplyr)
+library(tidyr)
+
+# - text-mining: pre-processing + stemmer, tokenizer, sentiment
+library(tm)
+library(tm.plugin.sentiment)
+library(XML)
+library(tau)
+library(stringr)
+
+# - SnowballC for Porter's stemmer
+library(SnowballC)
+
+# - Support + JVM Options
+library(rJava)
+numCores <- 2; # for multicore platforms
+options(mc.cores=numCores)
+.jinit(classpath="myClasses.jar", parameters="-Xmx512m")
+library(RWeka) # load RWeka for tokenizers only after setting Options
+
+# - topic models via Latent Dirichlet Allocation
+library(topicmodels)
+
+# - entitity recognition via Apache OpenNLP
+library(openNLP)
+
+# - graphics
+library(ggplot2)
+library(ggrepel)
+library(igraph)
+library(wordcloud)
+
+# - analytics
+library(Hmisc)
+library(smacof)
+library(ape)
+
+# - parallelism
+library(snowfall)
+```
+
+**1.2 Load Shakespear's Plays: a {tm} corpus stored in Part 1.**
+
+Let's load `corpus` back into our environment:
+
+``` {r echo = T}
+### ----------------------------------------------------------------------
+### --- Load Shakespear's Plays
+
+# - Load Shakespeare's Plays as a {tm} Corpus
+corpus <- readRDS('ShakespeareAnnotated.Rds')
+
+# - Document-level Metadata in corpus:
+corpus[[1]]$meta
+```
+
+Store all dramatis personae into `WScharacters`:
+
+``` {r echo = T}
+WScharacters <- meta(corpus, tag = "characters")
+head(WScharacters,2)
+```
+
+We will focus on **Macbeth** to demonstrate the transformations that we will be later applying over the whole corpus:
+
+``` {r echo = T}
+# - Macbeth:
+corpus[[19]]$meta$id
+macbeth <- corpus[[19]]$content
+class(macbeth)
+```
+
+**1.3 Some pre-processing**
+
+In order to demonstrate named entitiry recognition from {opeNLP} in R, we will first apply a set of gentle transformations over `macbeth` - that is simply a `character` now - to improve upon its readibility, to put it that way. I will explain this later:
+
+``` {r echo = T}
+# - a small correction: CHARACTERS to Names:
+# - CHARACTERS to Titles w. {string}:
+candidateCharacters1 <- unique(str_extract_all(macbeth, "[[:upper:]]{2,}\\s[[:upper:]]{2,}")[[1]])
+candidateCharacters2 <- unique(str_extract_all(macbeth, "[[:upper:]]{2,}")[[1]])
+candidateCharacters1
+```
+
+``` {r echo = T}
+candidateCharacters2
+```
+
+The previous two calls use `regex` and `str_extract_all` from {stringr} to extract all word or phrase of length two instances from `macbeth` typed in CAPITAL letters. The reason why I need this is the following: in the MIT edition of Shakespeare's plays that I am using here, character names always appear in capital letters *before giving a speech*. I want to take care of that by turning them into a graphemically more typical form: 'LADY MACBETH' to 'Lady Macbeth', for example.
+
+Now, as you can see from the output, there are things there that we don't wish to consider as candidates for character name recognition from plays:
+
+``` {r echo = T}
+candidateCharacters <- c(candidateCharacters1, candidateCharacters2)
+# - clean up w. regex:
+candidateCharacters <- candidateCharacters[-which(grepl("^ACT|\\bACT\\b", candidateCharacters))]
+candidateCharacters <- candidateCharacters[-which(grepl("^SCENE|\\bSCENE\\b", candidateCharacters))]
+# - Remove Roman numerals I - X w. regex:
+candidateCharacters <- candidateCharacters[-which(grepl("^I{1,3}$|^VI{1,3}$|^IV$|^V$|^IX$|^X$", candidateCharacters))]
+candidateCharacters
+```
+
+Ok. This is better. Now we will use the {stringr} function `str_to_title()` to transform these candidate character names from CAPITAL letters into Title (i.e., "MACBETH" to "Macbeth"):
+
+``` {r echo = T}
+# - implement:
+for (i in 1:length(candidateCharacters)) {
+  macbeth <- str_replace_all(macbeth, candidateCharacters[i], str_to_title(candidateCharacters[i]))
+}
+```
+
+**1.4 {NLP} and {openNLP} word and sentence annotations**
+
+Time to introduce {NLP} and {openNLP}. In order to use the functions offered by these two packages, we first need to transform whatever is a `character` class (for example, the `$content` of a `PlainTextDocument` from our {tm} corpora) into an object of a `String` class which is used by {NLP} and {openNLP}:
+
+``` {r echo = T}
+# - String class for {NLP} and {openNLP}
+macbeth <- as.String(macbeth)
+class(macbeth)
+```
+
+The `String` class enables us to subset the content of its instantiated objects by referring to the starting and ending character positions:
+
+``` {r echo = T}
+macbeth[10,20] # subsetting string objects in {NLP}
+```
+
+``` {r echo = T}
+macbeth[102,178]
+```
+
+The first two things that we want to do is to ask {openNLP} to segment `macbeth` into sentences and to tokenize it into words. These are very, very standard operations in text-mining and NLP, only sometimes you will have to go for tokenizing your texts into words *and* phrases of different length, and not words only. Here we will go for the simpler case. In order to perform text segmentation and tokenization, we first need to prepare some `Annotator`s from {openNLP}:
+
+``` {r echo = T}
+# - Word and Sentence annotators:
+wordAnnotator <- Maxent_Word_Token_Annotator(language = "en") # {openNLP}
+wordAnnotator
+```
+
+``` {r echo = T}
+sentenceAnnotator <- Maxent_Sent_Token_Annotator(language = "en") # {openNLP}
+sentenceAnnotator
+```
+
+These two functions are now our interfaces towards the Java functions that will actually perform sentence segmentation and word tokenization over `macbeth` from our R environment. To perform the annotation of `macbeth` with these two annotators, call `annotate` **from NLP** (N.B. you have loaded `ggplot2` which also uses `annotate`; many people ask about error feedbacks from `annotate()` on Stackoverflow without actually realizing that they need to overide `ggplot2`'s `(annotate()` by calling `NLP::annotate()`).
+
+This might take some time:
+
+``` {r echo = T}
+# - annotate Macbeth: N.B. use NLP::annotate to override ggplot2's annotate()!
+annotatedMacbeth <- NLP::annotate(macbeth,
+                                  list(sentenceAnnotator, wordAnnotator))
+class(annotatedMacbeth)
+```
+
+Let's learn about the properties of the `Annotation` class:
+
+``` {r echo = T}
+length(annotatedMacbeth)
+```
+
+
+``` {r echo = T}
+annotatedMacbeth[[1]]
+```
+
+``` {r echo = T}
+annotatedMacbeth[[2]]
+```
+
+``` {r echo = T}
+annotatedMacbeth[[2]]$start
+```
+
+And we have already learn that we can subset `String` objects by:
+
+``` {r echo = T}
+macbeth[annotatedMacbeth[[2]]$start, annotatedMacbeth[[2]]$end]
+```
+
+which extract a full sentence from `macbeth`: `annotatedMacbeth[[2]]` has a `type` field, which in this case has a value of `sentence` whose beginning is at the position stored in `start` and which ends at the position stored in `end`. This sentences, as we can see, has 4 constituents (namely: `A`, `desert`, `place`, `.`).
+
+``` {r echo = T}
+annotatedMacbeth[[1]]$features
+```
+
+1196, 1197, 1198, 1199,... : what are these numbers..?
+
+``` {r echo = T}
+class(annotatedMacbeth[[1]]$features)
+```
+
+``` {r echo = T}
+annotatedMacbeth[[1]]$features[[1]]$constituents
+```
+
+The numbers are the `id` fields of the word entities that were recognized by {openNLP} following the text tokenization; if you recall, we've asked for sentence segmentation and word tokenization. It will be easier to explain if I first transform `annotatedMacbeth` to a data.frame:
+
+``` {r echo = T}
+# $constituents:
+annMacbeth <- as.data.frame(annotatedMacbeth)
+head(annMacbeth)
+```
+
+`annotatedMacbeth` has stored sentence annotations from `macbeth` first, and...
+
+``` {r echo = T}
+tail(annMacbeth)
+```
+
+... words annotations after them. Let's pick only word annotations from `macbeth`:
+
+``` {r echo = T}
+annMacbeth <- annMacbeth %>% 
+  filter(type == "word")
+annotatedMacbeth[[1]]$features[[1]]$constituents
+```
+
+And they there are: the words encompassed by the first sentence - represented by `annotatedMacbeth[[1]]` and listed as its constituents in `annotatedMacbeth[[1]]$features[[1]]$constituents` are the annotations with the `id`s of: 1204, 1196, 1197, 1198, ... and up to 1203, in the `annotatedMacbeth`.
+
+
+``` {r echo = T}
+length(annotatedMacbeth[[1]]$features[[1]]$constituents)
+# the constituents of annotatedMacbeth[[1]]: words in a sentence
+annMacbeth$id[1:8]
+```
+
+Now when we understand the structure of the `Annotation` object, let's use it in conjunction with the `macbeth` (which is a `String`) to produce an `AnnotatedPlainTextDocument`:
+
+``` {r echo = T}
+# - AnnotatedPlainTextDocument
+macbethAPT <- AnnotatedPlainTextDocument(macbeth, annotatedMacbeth)
+class(macbethAPT)
+```
+
+We have met some of these in {tm} already; and of course:
+
+```  {r echo = T}
+is.list(macbethAPT)
+```
+
+Let' find out more about the properties of this object:
+
+```  {r echo = T}
+length(macbethAPT$annotations[[1]])
+```
+
+```  {r echo = T}
+macbethAPT$annotations[[1]][[23274]]
+```
+
+``` {r echo = T}
+length(sents(macbethAPT)) # 1195
+```
+
+``` {r echo = T}
+is.list(sents(macbethAPT))
+```
+
+The `sents()` function extracts sentences:
+
+``` {r echo = T}
+sents(macbethAPT)[[100]]
+```
+
+``` {r echo = T}
+class(sents(macbethAPT)[[1]])
+```
+
+``` {r echo = T}
+sents(macbethAPT) %>% head(5)
+```
+
+And `words()` would be for extracting words:
+
+``` {r echo = T}
+words(macbethAPT) %>% head(100)
+```
+
+Let's get ready to annotate the whole corpus of Shakespeare's plays!
+
+``` {r echo = T}
+# - clear
+rm(list = c('annMacbeth', 'annotatedMacbeth', 'macbethAPT'))
+```
+
+**1.5 Entity recognition with {openNLP}**
+
+**Note:** In order to perform entity recognition from {openNLP}, your documents must first undergo sentence and word tokenization as described.
+
+Apache OpenNLP relies on a set of pre-trained models in entity recognition; these models are *language-specific*. We are interested in personal name recognition, and from the [list of models available in openNLP 1.5 series](http://openNLP.sourceforge.net/models-1.5/) we can find out that the available models for this task are for English, Dutch, and Spanish only. Well, that is a constraint, but a one that we will have to leave with (did you say "English" - well, didn't Shakespeare's use exactly that language..? - He did, but he also wrote about people like *Romeo*, *Antonio*, *Caesar*, and many more of not quite typicall English names, right...)
+
+In order to be able to use these language-specific models, one first needs to install them. The models can be accessed from [http://datacube.wu.ac.at/](http://datacube.wu.ac.at/); the installation procedure is as follows:
+
+``` {r eval = F}
+### --- Entity Recognition from {openNLP}
+# - create an annotator:
+# - list of models available in openNLP 1.5 series:
+# - http://openNLP.sourceforge.net/models-1.5/
+# - visit: http://datacube.wu.ac.at/
+# - To install for Spanish:
+install.packages("http://datacube.wu.ac.at/src/contrib/openNLPmodels.es_1.5-1.tar.gz",
+                 repos = NULL,
+                 type = "source")
+# - To install for Dutch:
+install.packages("http://datacube.wu.ac.at/src/contrib/openNLPmodels.nl_1.5-2.tar.gz",
+                 repos = NULL,
+                 type = "source")
+```
+
+Now we need to create new `Annotator` objects for specific languages and `kind`s of entities that we are looking for - personal names in this case:
+
+``` {r echo = T}
+characterAnnotatorEN <- Maxent_Entity_Annotator(language = "en", kind = "person")
+characterAnnotatorES <- Maxent_Entity_Annotator(language = "es", kind = "person")
+characterAnnotatorNL <- Maxent_Entity_Annotator(language = "nl", kind = "person")
+```
+
+Do `?Maxent_Entity_Annotator` and find out about all different kinds of entities that {openNLP} can help recognize.
+
+Let's annotate the `macbeth` `String` again, this time by first running `sentenceAnnotator` and `wordAnnotator`, and then calling three `characterAnnotator`s: for English, Spanish, and Dutch - one by one:
+
+``` {r echo = T}
+annotatedMacbeth <- NLP::annotate(macbeth,
+                                  list(sentenceAnnotator,
+                                       wordAnnotator,
+                                       characterAnnotatorEN,
+                                       characterAnnotatorES,
+                                       characterAnnotatorNL))
+```
+
+Since we know how to convert an `Annotator` object to a `data.frame`, we can easily extract only entities from it:
+
+``` {r echo = T}
+# - keep only person entity annotations:
+annotatedMacbeth <- annotatedMacbeth %>% 
+  as.data.frame %>%
+  filter(type == "entity")
+# - extract Shakespeare's characters from Macbeth:
+charactersMachbet <- str_sub(as.character(macbeth),
+                             start = annotatedMacbeth$start,
+                             end = annotatedMacbeth$end) %>%
+  unique()
+charactersMachbet
+```
+
+Ooops... does this look like a like of characters from Macbeth at all? Let's compare this with what we have already stored as this play's characters in the `corpus`:
+
+``` {r echo = T}
+# - compare: 
+charactersMachbetCorpus <- unlist(strsplit(WScharacters[[19]],
+                                           split = ", ", fixed = T)[[1]])
+foundCharacters <- charactersMachbetCorpus[which(charactersMachbetCorpus %in% charactersMachbet)]
+foundCharacters
+```
+
+{openNLP} has managed to recognize only 13 characters in Macbeth; not to mention that *Macbeth* himself and *Lady Macbeth' are both missing. How accurate is this? Let's simplify the model evaluation here to computing the percent of recognize characters:
+
+``` {r echo = T}
+# - accuracy:
+acc <- round((length(foundCharacters)/length(charactersMachbetCorpus))*100,2)
+acc
+```
+
+Only about 42.5% of characters were recognized. Here'a a little to trick to improve upon this and similar results:
+
+``` {r echo = T}
+# - let's provide a small assistance to {openNLP}...
+charactersMachbet <- unique(c(charactersMachbet,
+                              unique(
+                                unlist(strsplit(charactersMachbet, 
+                                                split = " ", 
+                                                fixed = T)))
+                              )
+                            )
+foundCharacters <- 
+  charactersMachbetCorpus[which(charactersMachbetCorpus %in% charactersMachbet)]
+foundCharacters
+```
+
+We have simply split all multi-term entities into terms of length 1 and then intersected the new entries with the existing ones.
+
+``` {r echo = T}
+# - accuracy:
+acc <- round((length(foundCharacters)/length(charactersMachbetCorpus))*100,2)
+acc
+```
+
+The accuracy of recognition is now at **65%**, and let's be clear about two things:
+
++ *first*, this is **not** the way to evaluate how successfull an information extraction system is; in real-world settings, we would not have a pre-defined list of entities to compare against, neither would our approach to tokenize multi-term entities into single term entities bear any validity (in real world application over completelly unknown documents, what could justify the assumption that any personal names are enclosed in the multi-term entities suggest by an ML model?);
++ *second*, the result is rather poor, even when viewed in the setting of analysis as described here.
+
+*However*, Shakespeare's English is not the easiest case to crack with machine learning based entity recognition: namely, the {openNLP} models were certainly not trained to recognize anything from 16th century English plays, putting aside the problem of having personal name entity recognition models for a small selection of languages only. I have used {openNLP} entitity recognition in professional settings and to process documents written in contemporary English - and its performance was far better than what we can see here.
+
+**1.6 The whole Shakespeare undergoes {openNLP} entity recognition...**
+
+What I will try do here is the following:
+
++ annotate all 37 Shakespeare's plays with {openNLP};
++ perform named entity recogniton from {openNLP} over the annotated plays, hoping to extract the names of Shakespeare's characters from the plays;
++ compare the performance of the MaxEnt Apache openNLP models for personal names recognition with the already stored lists of characters in `corpus` for each play.
+
+The following code will simply loop through the whole `corpus` and perform {openNLP} entitity recognition, recycling all steps already presented in the case of `macbeth`. This will take a while (where `'a while' == 'a coffee break wouldn't heart at this point'`):
+
+``` {r echo = T, eval = F}
+# - Annotate all plays
+### ----------------------------------------------------------------------
+recognized <- character()
+accuracy <- numeric()
+# - a directory where annotated plays will be saved as .Rds files
+setwd(paste0(getwd(),"/FullCorpus/openNLPAnnotations"))
+for (i in 1:length(corpus)) {
+  print(paste0("Processing play ", i, ". out of 37..."))
+  play <- corpus[[i]]$content
+  # - CHARACTERS to Titles w. {string}:
+  candidateCharacters1 <- 
+    unique(str_extract_all(play, "[[:upper:]]{2,}\\s[[:upper:]]{2,}")[[1]])
+  candidateCharacters2 <- 
+    unique(str_extract_all(play, "[[:upper:]]{2,}")[[1]])
+  candidateCharacters <- 
+    c(candidateCharacters1, candidateCharacters2)
+  # - clean up w. regex:
+  candidateCharacters <- 
+    candidateCharacters[-which(grepl("^ACT|\\bACT\\b", candidateCharacters))]
+  candidateCharacters <- 
+    candidateCharacters[-which(grepl("^SCENE|\\bSCENE\\b", candidateCharacters))]
+  # - Remove Roman numerals I - X w. regex:
+  candidateCharacters <- 
+    candidateCharacters[-which(grepl("^I{1,3}$|^VI{1,3}$|^IV$|^V$|^IX$|^X$", candidateCharacters))]
+  # - implement:
+  for (j in 1:length(candidateCharacters)) {
+    play <- 
+      str_replace_all(play, candidateCharacters[j], str_to_title(candidateCharacters[j]))
+  }
+  
+  # - annotate w. {openNLP}
+  play <- as.String(play)
+  annotatedPlay <- NLP::annotate(play,
+                                 list(sentenceAnnotator,
+                                      wordAnnotator,
+                                      characterAnnotatorEN,
+                                      characterAnnotatorES,
+                                      characterAnnotatorNL))
+  saveRDS(annotatedPlay, file = paste0(corpus[[i]]$meta$id,
+                                       "_Annotated.Rds"))
+  
+  annotatedPlay <- annotatedPlay %>%
+    as.data.frame() %>%
+    filter(type == "entity")
+  
+  foundCharacters <- str_sub(as.character(play),
+                             start = annotatedPlay$start,
+                             end = annotatedPlay$end) %>%
+    unique()
+  
+  # - a small hint to help {openNLP}:
+  foundCharacters <- unique(c(foundCharacters,
+                              unique(
+                                unlist(strsplit(foundCharacters,
+                                                split = " ",
+                                                fixed = T)))
+                              )
+                            )
+  
+  corpusCharacters <- unlist(strsplit(corpus[[i]]$meta$characters,
+                                      split = ", ",
+                                      fixed = T))
+  
+  recognized[i] <- 
+    paste(corpusCharacters[which(corpusCharacters %in% foundCharacters)],
+                         collapse = ", ")
+  
+  accuracy[i] <- 
+    length(corpusCharacters[which(corpusCharacters %in% foundCharacters)])/length(corpusCharacters)
+  
+  rm(list = c('play','annotatedPlay','foundCharacters','corpusCharacters'))
+  
+}
+```
+
+Extract only the data that are necessary to inspect the performance of {openNLP}:
+
+``` {r echo = T, eval = F}
+
+charRecognition <- data.frame(play = as.character(meta(corpus, tag = "id")),
+                              recognized = recognized,
+                              accuracy = accuracy,
+                              stringsAsFactors = F)
+charRecognition$type = as.character(meta(corpus, tag = "description"))
+charRecognition$numCharsFound <- sapply(charRecognition$recognized, function(x) {
+  length(strsplit(x, split = ", ", fixed = T)[[1]])
+})
+charRecognition$numCharsCorpus <- sapply(meta(corpus, tag = "characters"), function(x) {
+  length(strsplit(x, split = ", ", fixed = T)[[1]])
+})
+write.csv(charRecognition, file = "charRecognition.csv")
+
+```
+
+**1.7 Evaluation: how well does {openNLP} perform against Shakespeare's plays?**
+
+Now, let's see:
+
+``` {r echo = T}
+# - Results
+### ----------------------------------------------------------------------
+rm(list=ls())
+library(dplyr)
+library(ggplot2)
+charRecognition <- read.csv("charRecognition.csv",
+                            header = T,
+                            row.names = 1,
+                            stringsAsFactors = F)
+head(charRecognition)
+```
+
+``` {r echo = T}
+summary(charRecognition$accuracy)
+```
+
+With a mean accuracy of 73% we cannot say that {openNLP} performance falls short. Once again: named entitiry recognition in Shakespeare's plays (again: 16/17th century English) is a serious task for any recognition system. Let's take a look at the results *prima facie*:
+
+``` {r echo = T}
+charRecognition$recognized[26] # Romeo and Juliet
+```
+
+``` {r echo = T}
+charRecognition$recognized[19] # Macbeth
+```
+
+``` {r echo = T}
+charRecognition$recognized[15] # Julius Caesar
+```
+
+And that would be it. Plot the accuracy distribution (reminder: "accuracy" is, in the context of this analysis, defined as a proportion of correct recognitions merely):
+
+``` {r echo = T}
+# - accuracy density plot 
+ggplot(data = charRecognition) +
+  geom_line(aes(accuracy), stat="density", color = "black", linetype = 2) + 
+  geom_line(aes(accuracy, color = type), stat="density") + 
+  scale_colour_manual(values = c("cadetblue4","firebrick4", "darkorchid4")) +
+  theme_classic() +
+  ggtitle("{openNLP} Named Entity Recognition\nShakespeare's Plays") +
+  theme(axis.line.y = element_blank()) +
+  theme(axis.line.x = element_blank()) +
+  theme(plot.title = element_text(size = 9, hjust = .5)) +
+  xlim(0,1)
+```
+
+The dashed black line represents the overall accuracy density. Next question: are there any significant differences in successful recognitions from Shakespeare's comedies, tragedies, and historical plays?
+
+``` {r echo = T}
+# - plot accuracy by type
+ggplot(data = charRecognition,
+       aes(x = type, y = accuracy, color = type)) +
+  scale_colour_manual(values = c("cadetblue4","firebrick4", "darkorchid4")) +
+  geom_jitter(aes(alpha = accuracy), size = 3.5, width = .1) + 
+  ylim(0, max(charRecognition$accuracy)+.2) + xlab(NULL) + ylab("Accuracy") + 
+  ggtitle("{openNLP} Named Entity Recognition\nShakespeare's Plays") + 
+  theme_classic() + 
+  theme(axis.line.y = element_blank()) +
+  theme(axis.line.x = element_blank()) +
+  theme(plot.title = element_text(size = 9, hjust = .5))
+```
+
+Some descriptive statistics on accuracy:
+
+``` {r echo = T}
+# - accuracy by type
+charRecognition %>% 
+  group_by(type) %>% 
+  summarise(MeanAcc = mean(accuracy), 
+            StDevAcc = sd(accuracy),
+            meanNumChar = mean(numCharsCorpus)) %>% 
+  arrange(desc(MeanAcc))
+```
+
+This differences here could be due to the differences in the number of characters that take part in different types of Shakespeare's plays:
+
+``` {r echo = T}
+# - plot accuracy by type 2
+ggplot(data = charRecognition,
+       aes(x = numCharsCorpus, y = accuracy, color = type)) +
+  scale_colour_manual(values = c("cadetblue4","firebrick4", "darkorchid4")) + 
+  theme_classic() +
+  geom_smooth(method = lm, alpha = .05) +
+  geom_point(aes(alpha = accuracy)) +
+  ylim(0, max(charRecognition$accuracy)+.2) + 
+  xlim(0, 70) +  
+  ylab("Accuracy") + xlab("Characters in Corpus") + 
+  ggtitle("{openNLP} Named Entity Recognition\nShakespeare's Plays") +
+  theme(axis.line.y = element_blank()) +
+  theme(axis.line.x = element_blank()) +
+  theme(plot.title = element_text(size = 9, hjust = .5))
+```
+
+Of course it is more difficult to be successful in recognition with more characters in a play to recognize; however, is there a *significant* effect when interactions with the type of play are taken into account?
+
+``` {r echo = T}
+playsFit1 <- 
+  glm(cbind(numCharsFound, numCharsCorpus-numCharsFound) ~ type + type:numCharsCorpus,
+      family = binomial(logit),
+      data = charRecognition)
+summary(playsFit1)
+```
+
+
+``` {r echo = T}
+exp(playsFit1$coefficients)
+```
+
+Let's now model accuracy by type of play only (no interactions with the number of characters in a play included):
+
+``` {r echo = T}
+playsFit2 <- 
+  glm(cbind(numCharsFound, numCharsCorpus-numCharsFound) ~ type,
+      family = binomial(logit),
+      data = charRecognition)
+summary(playsFit2)
+```
+
+``` {r echo = T}
+exp(playsFit2$coefficients)
+```
+
+``` {r echo = T}
+# - model selection: compare model Akaike's Information Criteria:
+playsFit1$aic < playsFit2$aic
+```
+
+The first model wins, and thus we know that the differences in accuracy of {openNLP} entity recognition from Shakespeare's plays in this exercise were due (a) partly to information inherent in the type of play (where being a *comedy* helps), and (b) partly to number of target entities that we were looking for - a factor that has signficantly affected the performance over tragedies and comedies.
+
+Why did the name recognition failed for histories in comparison to tragedies and comedies? It is difficult to say, but there is a hypothesis that I will put forward. I have managed to find a useful resource on Shakespeare's plays on [Folgerpedia](http://folgerpedia.folger.edu/List_of_settings_for_Shakespeare's_plays) that offers a table listing of all cities and (modern) countries where the plays take part. I will first use it to include additional metadata to `corpus`:
+
+``` {r echo = T}
+wDir <- paste0(getwd(),'/FullCorpus')
+setwd(wDir)
+playList2 <- read.csv('playList2.csv',
+                      header = T,
+                      check.names = F,
+                      stringsAsFactors = F)
+head(playList2)
+```
+
+**N.B.** `playList2` contains information on *The Two Noble Kinsmen*, a play not included in our `corpus`, published in 1634 and attributed to John Fletcher and William Shakespeare (cf. Wikipedia article on [The Two Noble Kinsmen](https://en.wikipedia.org/wiki/The_Two_Noble_Kinsmen)).
+
+Thus, a small intervention:
+
+``` {r echo = T}
+playList2$Title <- str_trim(playList2$Title, side = "right") # some trailing whitespace goes
+playList2$City <- str_trim(playList2$City, side = "right")
+playList2$Country_Modern <- str_trim(playList2$Country_Modern, side = "right")
+playList2 <- playList2[-which(playList2$Title == "The Two Noble Kinsmen"), ]
+```
+
+Now, the problem here is that the play titles, as given in `playList2`, do not match perfectly with the titles in `corpus` (we have  used the `id` field to store play titles in `corpus`). Did I ever told you about *fuzzy string matching* - something immensely useful in text-mining and related applications? You might wish to do `install.packages("stringdist")` first.
+
+``` {r echo = T}
+# - Load Shakespeare's Plays as a {tm} Corpus
+corpus <- readRDS('ShakespeareAnnotated.Rds')
+# {stringdist}
+library(stringdist)
+corpusTitles <- unlist(meta(corpus, tag = "id"))
+playList2Title <- playList2$Title
+distTitles <- stringdistmatrix(corpusTitles, playList2Title, method = c("dl"))
+distTitles <- distTitles %>% as.data.frame()
+```
+
+The `distTitles` now contains a matrix of *Damerau–Levenshtein distances* between the titles of Shakespeare's plays as found in our `corpus` against the titles as provided in `playList2`. The *Damerau–Levenshtein distance* *"...  is a distance (string metric) between two strings, i.e., finite sequence of symbols, given by counting the minimum number of operations needed to transform one string into the other, where an operation is defined as an insertion, deletion, or substitution of a single character, or a transposition of two adjacent characters."* (source: [Damerau–Levenshtein distance Wikipedia Article](https://en.wikipedia.org/wiki/Damerau%E2%80%93Levenshtein_distance))
+
+The entries from `corpus` are found in rows; let's see what are the corresponding, minimal distance entries in each column:
+
+``` {r echo = T}
+matchTitles <- apply(distTitles, 1, function(x) {return(which.min(x))})
+```
+
+Are the results consistent?
+
+``` {r echo = T}
+sum((duplicated(matchTitles)))
+```
+
+Check:
+
+``` {r echo = T}
+matchFrame <- data.frame(corpus = corpusTitles,
+                         new = playList2$Title[matchTitles],
+                         stringsAsFactors = F)
+head(matchFrame)
+```
+
+``` {r echo = T}
+tail(matchFrame)
+```
+
+Grab the new metadata from `playList2` and enter it to `corpus` (N.B. `matchTitles` are indexes of `playList2$Title` that match the `id` tag in `corpus` orderly):
+
+``` {r echo = T}
+# - new metadata
+meta(corpus, tag = "description2", type = "local") <- 
+  playList2$Genre[matchTitles]
+meta(corpus, tag = "city", type = "local") <- 
+  playList2$City[matchTitles]
+meta(corpus, tag = "country", type = "local") <- 
+  playList2$Country_Modern[matchTitles]
+meta(corpus, tag = "countryNote", type = "local") <- 
+  playList2$CountryNote[matchTitles]
+### --- writeCorpus()
+saveRDS(corpus, file = "ShakespeareAnnotated.Rds")
+```
+
+Good. Back to our question: can we at least hypothesize why entity recognition worked better for comedies and tragedies compared to Shakespeare's historical plays? Let's see *where* do these plays take place:
+
+``` {r echo = T}
+type <- unlist(meta(corpus, tag = "description"))
+wComedy <- which(type == "Comedy")
+wTragedy <- which(type == "Tragedy")
+wHistory <- which(type == "History")
+comedyCountries <- unname(unlist(meta(corpus, tag = "country")))[wComedy]
+table(comedyCountries)
+```
+
+``` {r echo = T}
+tragedyCountries <- unname(unlist(meta(corpus, tag = "country")))[wTragedy]
+table(tragedyCountries)
+```
+
+``` {r echo = T}
+historyCountries <- unname(unlist(meta(corpus, tag = "country")))[wHistory]
+table(historyCountries)
+```
+
+As already explained, {openNLP} entity recognition models are language-specific, and we had only three of them at our disposal to recognize personal names: English, Spanish, and Dutch. All historical plays take place in the United Kingdom, where the English model could help (and probably Dutch to some degree). On the other hand, five tragedies and five comedies take place in Italy, while three out of ten tragedies take place in United Kingdom, Scotland, and Denmark; of comedies, we also have one in Spain and one in France. We thus hypothesize that the Spanish personal name recognition model from {openNLP} functioned as a kind of proxy for Italian names here, boosting the performance over comedies and tragedies in comparison to Shakespeare's historical plays.
+
+*** 
+
+The forthcoming **Part 3.** of this tutorial will cover **Text pre-processing with {tm}**. **Part 4.** will introduce *topic modeling* with Latent Dirichlet Allocation. **Part 5**, finally, will present an analytical exploration of the topic model.
+
+Stay tuned for more text-mining in R.
+
+***
+
+Visit my blog :: [The Exactness of Mind](http://www.exactness.net), 01/01/2017.  
+
