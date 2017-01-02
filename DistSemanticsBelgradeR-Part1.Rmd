@@ -385,7 +385,6 @@ setwd(wDir)
 playList <- read.csv('playList.csv',
                      header = T,
                      check.names = F,
-                     row.names = 1,
                      stringsAsFactors = F)
 str(playList)
 ```
@@ -539,6 +538,8 @@ Ok. Now all the necessary metadata are in place. We will first store our `corpus
 
 ``` {r echo = T}
 ### --- writeCorpus()
+outDir <- paste0(getwd(),"/FullCorpus")
+setwd(outDir)
 saveRDS(corpus, file = "ShakespeareAnnotated.Rds")
 ```
 

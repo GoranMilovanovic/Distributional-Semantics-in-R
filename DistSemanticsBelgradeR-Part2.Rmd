@@ -92,6 +92,8 @@ Let's load `corpus` back into our environment:
 ### --- Load Shakespear's Plays
 
 # - Load Shakespeare's Plays as a {tm} Corpus
+outDir <- paste0(getwd(),"/FullCorpus")
+setwd(outDir
 corpus <- readRDS('ShakespeareAnnotated.Rds')
 
 # - Document-level Metadata in corpus:
@@ -563,7 +565,7 @@ head(charRecognition)
 summary(charRecognition$accuracy)
 ```
 
-With a mean accuracy of 73% we cannot say that {openNLP} performance falls short. Once again: named entitiry recognition in Shakespeare's plays (again: 16/17th century English) is a serious task for any recognition system. Let's take a look at the results *prima facie*:
+With a mean accuracy of 73% we cannot say that entity recognition falls short; *but do not forget that this is not a truly valid indicator in itself* because we're boosting it by breaking any multi-term entities into chunks - *an approach that would not do in any realistic setting*! Once again: named entitiry recognition in Shakespeare's plays (again: 16/17th century English) is a serious task for any recognition system. Let's take a look at the results *prima facie*:
 
 ``` {r echo = T}
 charRecognition$recognized[26] # Romeo and Juliet
@@ -685,72 +687,62 @@ playList2 <- read.csv('playList2.csv',
                       header = T,
                       check.names = F,
                       stringsAsFactors = F)
-head(playList2)
+str(playList2)
 ```
 
-**N.B.** `playList2` contains information on *The Two Noble Kinsmen*, a play not included in our `corpus`, published in 1634 and attributed to John Fletcher and William Shakespeare (cf. Wikipedia article on [The Two Noble Kinsmen](https://en.wikipedia.org/wiki/The_Two_Noble_Kinsmen)).
-
-Thus, a small intervention:
-
 ``` {r echo = T}
-playList2$Title <- str_trim(playList2$Title, side = "right") # some trailing whitespace goes
+# - clear up playList2 a bit:
+library(stringr)
+playList2$Genre <- str_trim(playList2$Genre, side = "right")
 playList2$City <- str_trim(playList2$City, side = "right")
 playList2$Country_Modern <- str_trim(playList2$Country_Modern, side = "right")
-playList2 <- playList2[-which(playList2$Title == "The Two Noble Kinsmen"), ]
-```
-
-Now, the problem here is that the play titles, as given in `playList2`, do not match perfectly with the titles in `corpus` (we have  used the `id` field to store play titles in `corpus`). Did I ever told you about *fuzzy string matching* - something immensely useful in text-mining and related applications? You might wish to do `install.packages("stringdist")` first.
-
-``` {r echo = T}
-# - Load Shakespeare's Plays as a {tm} Corpus
-corpus <- readRDS('ShakespeareAnnotated.Rds')
-# {stringdist}
-library(stringdist)
-corpusTitles <- unlist(meta(corpus, tag = "id"))
-playList2Title <- playList2$Title
-distTitles <- stringdistmatrix(corpusTitles, playList2Title, method = c("dl"))
-distTitles <- distTitles %>% as.data.frame()
-```
-
-The `distTitles` now contains a matrix of *Damerau–Levenshtein distances* between the titles of Shakespeare's plays as found in our `corpus` against the titles as provided in `playList2`. The *Damerau–Levenshtein distance* *"...  is a distance (string metric) between two strings, i.e., finite sequence of symbols, given by counting the minimum number of operations needed to transform one string into the other, where an operation is defined as an insertion, deletion, or substitution of a single character, or a transposition of two adjacent characters."* (source: [Damerau–Levenshtein distance Wikipedia Article](https://en.wikipedia.org/wiki/Damerau%E2%80%93Levenshtein_distance))
-
-The entries from `corpus` are found in rows; let's see what are the corresponding, minimal distance entries in each column:
-
-``` {r echo = T}
-matchTitles <- apply(distTitles, 1, function(x) {return(which.min(x))})
-```
-
-Are the results consistent?
-
-``` {r echo = T}
-sum((duplicated(matchTitles)))
-```
-
-Check:
-
-``` {r echo = T}
-matchFrame <- data.frame(corpus = corpusTitles,
-                         new = playList2$Title[matchTitles],
-                         stringsAsFactors = F)
-head(matchFrame)
-```
-
-``` {r echo = T}
-tail(matchFrame)
+playList2$CountryNote <- str_trim(playList2$CountryNote, side = "right")
+head(playList2)
 ```
 
 Grab the new metadata from `playList2` and enter it to `corpus` (N.B. `matchTitles` are indexes of `playList2$Title` that match the `id` tag in `corpus` orderly):
 
 ``` {r echo = T}
+# - Load Shakespeare's Plays as a {tm} Corpus
+library(tm)
+# - Load Shakespeare's Plays as a {tm} Corpus
+outDir <- paste0(getwd(),"/FullCorpus")
+setwd(outDir)
+corpus <- readRDS('ShakespeareAnnotated.Rds')
+```
+
+
+``` {r echo = T}
 # - new metadata
 meta(corpus, tag = "description2", type = "local") <- 
-  playList2$Genre[matchTitles]
+  unname(sapply(meta(corpus, tag = "id"),
+         function(x) {
+           wPlay <- which(playList2$Title == as.character(x))
+           playList2$Genre
+         }))
 meta(corpus, tag = "city", type = "local") <- 
-  playList2$City[matchTitles]
+  unname(sapply(meta(corpus, tag = "id"),
+         function(x) {
+           wPlay <- which(playList2$Title == as.character(x))
+           playList2$City
+         }))
 meta(corpus, tag = "country", type = "local") <- 
-  playList2$Country_Modern[matchTitles]
+  unname(sapply(meta(corpus, tag = "id"),
+         function(x) {
+           wPlay <- which(playList2$Title == as.character(x))
+           playList2$Country_Modern
+         }))
 meta(corpus, tag = "countryNote", type = "local") <- 
-  playList2$CountryNote[matchTitles]
+  unname(sapply(meta(corpus, tag = "id"),
+         function(x) {
+           wPlay <- which(playList2$Title == as.character(x))
+           playList2$CountryNote
+         }))
+```
+
+Save `corpus` with new metadata:
+
+``` {r echo = T}
 ### --- writeCorpus()
 saveRDS(corpus, file = "ShakespeareAnnotated.Rds")
 ```
@@ -776,7 +768,7 @@ historyCountries <- unname(unlist(meta(corpus, tag = "country")))[wHistory]
 table(historyCountries)
 ```
 
-As already explained, {openNLP} entity recognition models are language-specific, and we had only three of them at our disposal to recognize personal names: English, Spanish, and Dutch. All historical plays take place in the United Kingdom, where the English model could help (and probably Dutch to some degree). On the other hand, five tragedies and five comedies take place in Italy, while three out of ten tragedies take place in United Kingdom, Scotland, and Denmark; of comedies, we also have one in Spain and one in France. We thus hypothesize that the Spanish personal name recognition model from {openNLP} functioned as a kind of proxy for Italian names here, boosting the performance over comedies and tragedies in comparison to Shakespeare's historical plays.
+As already explained, {openNLP} entity recognition models are language-specific, and we had only three of them at our disposal to recognize personal names: English, Spanish, and Dutch. All historical plays take place in the United Kingdom, where the English model could help (and probably Dutch to some degree). On the other hand, five tragedies and five comedies take place in Italy, while three out of ten tragedies additionally take place in United Kingdom, Scotland, and Denmark; of comedies, we also have one taking place in Spain and one in France. We thus hypothesize that the Spanish personal name recognition model from {openNLP} functioned as a kind of proxy for Italian names here, boosting the performance over comedies and tragedies in comparison to Shakespeare's historical plays.
 
 *** 
 
