@@ -93,7 +93,7 @@ Let's load `corpus` back into our environment:
 
 # - Load Shakespeare's Plays as a {tm} Corpus
 outDir <- paste0(getwd(),"/FullCorpus")
-setwd(outDir
+setwd(outDir)
 corpus <- readRDS('ShakespeareAnnotated.Rds')
 
 # - Document-level Metadata in corpus:
@@ -744,6 +744,9 @@ Save `corpus` with new metadata:
 
 ``` {r echo = T}
 ### --- writeCorpus()
+# - Load Shakespeare's Plays as a {tm} Corpus
+outDir <- paste0(getwd(),"/FullCorpus")
+setwd(outDir)
 saveRDS(corpus, file = "ShakespeareAnnotated.Rds")
 ```
 
