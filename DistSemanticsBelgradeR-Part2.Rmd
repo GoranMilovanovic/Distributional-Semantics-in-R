@@ -28,11 +28,11 @@ In this notebook we will focus on entity recognition from {openNLP} by trying to
 
 ***
 
-### Part 1: The {tm} structures for text-mining in R
+### Part 2: Entity Recognition with {openNLP}
 
 The fact is, you don't really need to load all these packages in order to work with the notebook. I'm simply copying the whole *Load packages* code chunk from one notebook to another in this repository; it comprises all the packages used in the text-mining of Shakespeare's plays. For this Part (2) of the exercise, you need to load `tm`, `dplyr`, `ggplot2`, `stringr`, `NLP`, and `openNLP` only; a call to `library(openNLP)` will automatically import `NLP` as a dependency.
 
-**1.1 Clear all + Load packages**
+**2.1 Clear all + Load packages**
 
 ``` {r echo = T, message = F}
 ### --- clear all
@@ -83,7 +83,7 @@ library(ape)
 library(snowfall)
 ```
 
-**1.2 Load Shakespear's Plays: a {tm} corpus stored in Part 1.**
+**2.2 Load Shakespear's Plays: a {tm} corpus stored in Part 1.**
 
 Let's load `corpus` back into our environment:
 
@@ -116,7 +116,7 @@ macbeth <- corpus[[19]]$content
 class(macbeth)
 ```
 
-**1.3 Some pre-processing**
+**2.3 Some pre-processing**
 
 In order to demonstrate named entitiry recognition from {opeNLP} in R, we will first apply a set of gentle transformations over `macbeth` - that is simply a `character` now - to improve upon its readibility, to put it that way. I will explain this later:
 
@@ -155,7 +155,7 @@ for (i in 1:length(candidateCharacters)) {
 }
 ```
 
-**1.4 {NLP} and {openNLP} word and sentence annotations**
+**2.4 {NLP} and {openNLP} word and sentence annotations**
 
 Time to introduce {NLP} and {openNLP}. In order to use the functions offered by these two packages, we first need to transform whatever is a `character` class (for example, the `$content` of a `PlainTextDocument` from our {tm} corpora) into an object of a `String` class which is used by {NLP} and {openNLP}:
 
@@ -330,7 +330,7 @@ Let's get ready to annotate the whole corpus of Shakespeare's plays!
 rm(list = c('annMacbeth', 'annotatedMacbeth', 'macbethAPT'))
 ```
 
-**1.5 Entity recognition with {openNLP}**
+**2.5 Entity recognition with {openNLP}**
 
 **Note:** In order to perform entity recognition from {openNLP}, your documents must first undergo sentence and word tokenization as described.
 
@@ -439,7 +439,7 @@ The accuracy of recognition is now at **65%**, and let's be clear about two thin
 
 *However*, Shakespeare's English is not the easiest case to crack with machine learning based entity recognition: namely, the {openNLP} models were certainly not trained to recognize anything from 16th century English plays, putting aside the problem of having personal name entity recognition models for a small selection of languages only. I have used {openNLP} entitity recognition in professional settings and to process documents written in contemporary English - and its performance was far better than what we can see here.
 
-**1.6 The whole Shakespeare undergoes {openNLP} entity recognition...**
+**2.6 The whole Shakespeare undergoes {openNLP} entity recognition...**
 
 What I will try do here is the following:
 
@@ -528,7 +528,6 @@ for (i in 1:length(corpus)) {
 Extract only the data that are necessary to inspect the performance of {openNLP}:
 
 ``` {r echo = T, eval = F}
-
 charRecognition <- data.frame(play = as.character(meta(corpus, tag = "id")),
                               recognized = recognized,
                               accuracy = accuracy,
@@ -541,10 +540,9 @@ charRecognition$numCharsCorpus <- sapply(meta(corpus, tag = "characters"), funct
   length(strsplit(x, split = ", ", fixed = T)[[1]])
 })
 write.csv(charRecognition, file = "charRecognition.csv")
-
 ```
 
-**1.7 Evaluation: how well does {openNLP} perform against Shakespeare's plays?**
+**2.7 Evaluation: how well does {openNLP} perform against Shakespeare's plays?**
 
 Now, let's see:
 
